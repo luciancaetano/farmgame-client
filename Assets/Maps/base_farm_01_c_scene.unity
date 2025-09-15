@@ -194,8 +194,10 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   moveSpeed: 5
   moveAction: {fileID: -1680190386980627800, guid: 2bcd2660ca9b64942af0de543d8d7100, type: 3}
-  smoothing: 10
-  worldGrid: {fileID: 1203924902}
+  teleportThreshold: 2
+  smoothingThreshold: 0.7
+  reconciliationDelay: 0.1
+  smoothTime: 0.05
 --- !u!1 &519420028
 GameObject:
   m_ObjectHideFlags: 0
@@ -9512,6 +9514,10 @@ PrefabInstance:
       propertyPath: m_Name
       value: NetworkManager
       objectReference: {fileID: 0}
+    - target: {fileID: 4406004381052099661, guid: 80e32477e9d2416499164171a82bef67, type: 3}
+      propertyPath: worldGrid
+      value: 
+      objectReference: {fileID: 1203924902}
     - target: {fileID: 4406004381052099661, guid: 80e32477e9d2416499164171a82bef67, type: 3}
       propertyPath: onlinePlayerPrefab
       value: 

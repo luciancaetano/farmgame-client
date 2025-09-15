@@ -4,17 +4,21 @@ using Colyseus.Schema;
 
 public class OnlinePlayerController : MonoBehaviour
 {
-    [SerializeField] private float smoothing = 10f; // velocidade máxima de interpolação por FixedUpdate
+    [SerializeField] private float smoothing = 5f; // velocidade de interpolação em unidades/segundo
+    public Grid worldGrid;
+
     private Rigidbody2D rb;
     private StateCallbackStrategy<FarmRoomSchema> callbacks;
     private Vector2 targetPosition;
     public string PlayerID;
 
     // Inicializa com ID e posição inicial
-    public void Initialize(string id, Vector2 initialPosition)
+    public void Initialize(string id, Vector2 initialPosition, Grid grid)
     {
+        worldGrid = grid;
         PlayerID = id;
         targetPosition = initialPosition;
+
         if (rb != null)
         {
             rb.position = initialPosition;
@@ -39,18 +43,23 @@ public class OnlinePlayerController : MonoBehaviour
 
     void FixedUpdate()
     {
-        // Movimenta suavemente para a posição alvo do servidor com velocidade constante
-        rb.position = Vector2.MoveTowards(rb.position, targetPosition, smoothing * Time.fixedDeltaTime);
+        // Interpola em direção à posição alvo (do servidor) com velocidade constante
+        rb.position = Vector2.MoveTowards(
+            rb.position,
+            targetPosition,
+            smoothing * Time.fixedDeltaTime
+        );
     }
 
     void OnPlayerAdd(string key, PlayerSchema player)
     {
         if (key != PlayerID) return;
-
-        // Escuta mudanças deste player específico
-        callbacks.OnChange(player, () =>
+        // Escuta mudanças só da posição do player
+        callbacks.OnChange(player.position, () =>
         {
-            targetPosition = new Vector2(player.position.x, player.position.y);
+            // Converte da célula para world space
+            Vector3 cell = new Vector3(player.position.x, player.position.y, 0);
+            targetPosition = worldGrid.GetCellCenterWorld(Vector3Int.FloorToInt(cell));
         });
     }
 }

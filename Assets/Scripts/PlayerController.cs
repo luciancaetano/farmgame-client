@@ -6,22 +6,28 @@ using Colyseus.Schema;
 
 public class PlayerController : MonoBehaviour
 {
+    [Header("Movimento")]
     [SerializeField] private float moveSpeed = 5f;
     [SerializeField] private InputActionReference moveAction;
-    [SerializeField] private float smoothing = 10f; // velocidade de interpolaçao
-    [SerializeField] private Grid worldGrid;
+
+    [Header("Reconciliação")]
+    [SerializeField] private float teleportThreshold = 4f;
+    [SerializeField] private float smoothingThreshold = 0.05f;
+    [SerializeField] private float smoothTime = 0.1f;
 
     private Rigidbody2D rb;
     private StateCallbackStrategy<FarmRoomSchema> callbacks;
+    private long seq = 0;
+
     private List<InputMessage> pendingInputs = new List<InputMessage>();
-    private int seq = 0;
+    private Vector2 velocitySmooth;
 
     [System.Serializable]
     private class InputMessage
     {
-        public int seq;
-        public bool up, down, left, right;
-        public float dt;
+        public long seq;
+        public float dx;
+        public float dy;
     }
 
     void Awake()
@@ -35,60 +41,56 @@ public class PlayerController : MonoBehaviour
 
         callbacks = Callbacks.Get(NetworkManager.Instance.farmRoom);
         callbacks.OnAdd(state => state.players, OnPlayerAdd);
-
-        Debug.Log("PlayerController connected to room.");
     }
 
     void FixedUpdate()
     {
+        if (!NetworkManager.Instance.IsConnected) return;
+        Time.fixedDeltaTime = 1f / 60f;
+
         Vector2 inputVector = moveAction.action.ReadValue<Vector2>();
-        if (inputVector == Vector2.zero) return;
 
-        InputMessage input = new InputMessage
-        {
-            seq = seq++,
-            up = inputVector.y > 0,
-            down = inputVector.y < 0,
-            left = inputVector.x < 0,
-            right = inputVector.x > 0,
-            dt = Time.fixedDeltaTime
-        };
+        // Cria e envia input
+        var msg = new InputMessage { seq = ++seq, dx = inputVector.x, dy = inputVector.y };
+        NetworkManager.Instance.farmRoom.Send("move", msg);
 
-        pendingInputs.Add(input);
+        // Adiciona no buffer de inputs pendentes
+        pendingInputs.Add(msg);
 
-        // envia para o servidor
-        NetworkManager.Instance.farmRoom.Send("move", input);
+        // Predição local imediata
+        rb.position += inputVector * moveSpeed * Time.fixedDeltaTime;
 
-        // predicao local
-        Vector2 delta = Vector2.zero;
-        if (input.up) delta.y += 1;
-        if (input.down) delta.y -= 1;
-        if (input.left) delta.x -= 1;
-        if (input.right) delta.x += 1;
-
-        delta = delta.normalized * moveSpeed * input.dt;
-        rb.MovePosition(rb.position + delta);
+        // Reconciliação
+        Reconcile();
     }
 
-    public void OnServerState(Vector2 newServerCellPos, int ackSeq)
+    void Reconcile()
     {
-        // Corrige a posição do cliente imediatamente
-        rb.position = newServerCellPos;
+        var player = NetworkManager.Instance.farmRoom.State.players[NetworkManager.Instance.farmRoom.SessionId];
+        if (player == null) return;
 
-        // Remove todos os inputs que o servidor já processou
-        pendingInputs.RemoveAll(input => input.seq <= ackSeq);
+        Vector2 serverPos = new Vector2(player.position.x, player.position.y);
 
-        // Reaplica os inputs que ainda não foram confirmados
+        // Remove inputs já processados pelo servidor
+        pendingInputs.RemoveAll(input => input.seq <= player.lastSeq);
+
+        // Predição: reaplica apenas inputs pendentes
+        Vector2 predictedPos = serverPos;
         foreach (var input in pendingInputs)
         {
-            Vector2 delta = Vector2.zero;
-            if (input.up) delta.y += 1;
-            if (input.down) delta.y -= 1;
-            if (input.left) delta.x -= 1;
-            if (input.right) delta.x += 1;
+            predictedPos += new Vector2(input.dx, input.dy) * moveSpeed * Time.fixedDeltaTime;
+        }
 
-            delta = delta.normalized * moveSpeed * input.dt;
-            rb.position += delta; // Move sem enviar de novo
+        // Correção suave ou teleport
+        float distance = Vector2.Distance(rb.position, predictedPos);
+
+        if (distance > teleportThreshold)
+        {
+            rb.position = predictedPos; // Teleporta se estiver muito fora
+        }
+        else if (distance > smoothingThreshold)
+        {
+            rb.position = Vector2.SmoothDamp(rb.position, predictedPos, ref velocitySmooth, smoothTime);
         }
     }
 
@@ -98,8 +100,6 @@ public class PlayerController : MonoBehaviour
 
         callbacks.OnChange(player, () =>
         {
-            Vector2 newServerCellPos = new Vector2(player.position.x, player.position.y);
-            OnServerState(newServerCellPos, (int)player.lastSeq + 1);
             moveSpeed = player.moveSpeed;
         });
     }

@@ -24,16 +24,22 @@ public PlayerSchema() { }
 	[Type(2, "ref", typeof(Position2D))]
 	public Position2D position = null;
 
-	[Type(3, "number")]
+	[Type(3, "int64")]
+	public long lastSeq = default(long);
+
+	[Type(4, "float32")]
+	public float moveSpeed = default(float);
+
+	[Type(5, "float32")]
+	public float fixedDeltaTime = default(float);
+
+	[Type(6, "float32")]
 	public float vx = default(float);
 
-	[Type(4, "number")]
+	[Type(7, "float32")]
 	public float vy = default(float);
 
-	[Type(5, "number")]
-	public float lastSeq = default(float);
-
-	[Type(6, "number")]
-	public float moveSpeed = default(float);
+	[Type(8, "int64")]
+	public long currentTime = default(long);
 }
 

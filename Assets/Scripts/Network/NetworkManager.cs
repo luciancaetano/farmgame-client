@@ -11,6 +11,8 @@ public class NetworkManager : MonoBehaviour
     public ColyseusRoom<FarmRoomSchema> farmRoom = null;
     public bool IsConnected = false;
     public GameObject onlinePlayerPrefab;
+    [SerializeField]
+    private Grid worldGrid;
 
     private void Awake()
     {
@@ -67,7 +69,7 @@ public class NetworkManager : MonoBehaviour
         var initialPos = new Vector2(player.position.x, player.position.y);
         var go = Instantiate(onlinePlayerPrefab, initialPos, Quaternion.identity);
         var onlineController = go.GetComponent<OnlinePlayerController>();
-        onlineController.Initialize(player.id, initialPos);
+        onlineController.Initialize(player.id, initialPos, worldGrid);
     }
 
     public void OnPlayerRemove(string key, PlayerSchema player)
