@@ -29,17 +29,5 @@ public PlayerSchema() { }
 
 	[Type(4, "float32")]
 	public float moveSpeed = default(float);
-
-	[Type(5, "float32")]
-	public float fixedDeltaTime = default(float);
-
-	[Type(6, "float32")]
-	public float vx = default(float);
-
-	[Type(7, "float32")]
-	public float vy = default(float);
-
-	[Type(8, "int64")]
-	public long currentTime = default(long);
 }
 

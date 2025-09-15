@@ -14,6 +14,8 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private float teleportThreshold = 4f;
     [SerializeField] private float smoothingThreshold = 0.05f;
     [SerializeField] private float smoothTime = 0.1f;
+    [SerializeField] private float sendRate = 0.05f; // 50ms → 20 msgs por segundo
+    private float sendTimer = 0f;
 
     private Rigidbody2D rb;
     private StateCallbackStrategy<FarmRoomSchema> callbacks;
@@ -33,6 +35,7 @@ public class PlayerController : MonoBehaviour
     void Awake()
     {
         rb = GetComponent<Rigidbody2D>();
+        Time.fixedDeltaTime = 1f / 60f;
     }
 
     IEnumerator Start()
@@ -40,24 +43,33 @@ public class PlayerController : MonoBehaviour
         yield return new WaitUntil(() => NetworkManager.Instance.IsConnected);
 
         callbacks = Callbacks.Get(NetworkManager.Instance.farmRoom);
-        callbacks.OnAdd(state => state.players, OnPlayerAdd);
+    }
+
+    void Update()
+    {
+        var player = NetworkManager.Instance.farmRoom.State.players[NetworkManager.Instance.farmRoom.SessionId];
+        if (player == null) return;
+        moveSpeed = player.moveSpeed;
     }
 
     void FixedUpdate()
     {
         if (!NetworkManager.Instance.IsConnected) return;
-        Time.fixedDeltaTime = 1f / 60f;
+
+        sendTimer += Time.fixedDeltaTime;
 
         Vector2 inputVector = moveAction.action.ReadValue<Vector2>();
 
-        // Cria e envia input
-        var msg = new InputMessage { seq = ++seq, dx = inputVector.x, dy = inputVector.y };
-        NetworkManager.Instance.farmRoom.Send("move", msg);
+        if (sendTimer >= sendRate)
+        {
+            var msg = new InputMessage { seq = ++seq, dx = inputVector.x, dy = inputVector.y };
+            NetworkManager.Instance.farmRoom.Send("move", msg);
+            pendingInputs.Add(msg);
 
-        // Adiciona no buffer de inputs pendentes
-        pendingInputs.Add(msg);
+            sendTimer = 0f;
+        }
 
-        // Predição local imediata
+        // Predição local
         rb.position += inputVector * moveSpeed * Time.fixedDeltaTime;
 
         // Reconciliação
@@ -92,15 +104,5 @@ public class PlayerController : MonoBehaviour
         {
             rb.position = Vector2.SmoothDamp(rb.position, predictedPos, ref velocitySmooth, smoothTime);
         }
-    }
-
-    void OnPlayerAdd(string key, PlayerSchema player)
-    {
-        if (key != NetworkManager.Instance.farmRoom.SessionId) return;
-
-        callbacks.OnChange(player, () =>
-        {
-            moveSpeed = player.moveSpeed;
-        });
     }
 }
