@@ -49,7 +49,7 @@ public class PlayerController : MonoBehaviour
             {
                 callbacks.OnChange(player, () =>
                 {
-                    if (lastServerPosition.x != player.position.x || lastServerPosition.y != player.position.y)
+                    if (Vector2.Distance(new Vector2(lastServerPosition.x, lastServerPosition.y), new Vector2(player.position.x, player.position.y)) > 0.01f)
                     {
                         OnServerUpdate(player);
                         lastServerPosition.x = player.position.x;
@@ -130,7 +130,7 @@ public class PlayerController : MonoBehaviour
         foreach (var input in pendingInputs)
         {
             Vector2 moveDelta = CalculateMoveDelta(input);
-            rb.position += moveDelta;
+            rb.MovePosition(rb.position + moveDelta);
         }
     }
 }
