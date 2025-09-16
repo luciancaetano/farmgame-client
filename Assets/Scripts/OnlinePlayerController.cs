@@ -4,13 +4,32 @@ using Colyseus.Schema;
 
 public class OnlinePlayerController : MonoBehaviour
 {
-    [SerializeField] private float smoothing = 5f; // velocidade de interpolação em unidades/segundo
+    [Header("Movimento")]
+    [SerializeField] private float smoothing = 5f; // unidades/segundo
+    [SerializeField] private float teleportThreshold = 4f; // teleporta se estiver muito longe
+    [SerializeField] private float smoothingThreshold = 0.05f; // aplica smooth apenas acima desse delta
+    [SerializeField] private float smoothTime = 0.1f;
+
     public Grid worldGrid;
 
     private Rigidbody2D rb;
     private StateCallbackStrategy<FarmRoomSchema> callbacks;
     private Vector2 targetPosition;
+    private Vector2 velocitySmooth;
+
     public string PlayerID;
+    private PlayerSchema Player
+    {
+        get
+        {
+            var nm = NetworkManager.Instance;
+            if (nm == null || nm.farmRoom == null || nm.farmRoom.State == null || PlayerID == null)
+                return null;
+            if (!nm.farmRoom.State.players.ContainsKey(PlayerID))
+                return null;
+            return nm.farmRoom.State.players[PlayerID];
+        }
+    }
 
     // Inicializa com ID e posição inicial
     public void Initialize(string id, Vector2 initialPosition, Grid grid)
@@ -36,30 +55,42 @@ public class OnlinePlayerController : MonoBehaviour
         yield return new WaitUntil(() => NetworkManager.Instance.IsConnected);
 
         callbacks = Callbacks.Get(NetworkManager.Instance.farmRoom);
-        callbacks.OnAdd(state => state.players, OnPlayerAdd);
+
+        // Registra callback para atualizar targetPosition quando o player/npc mudar
+        if (Player != null)
+        {
+            callbacks.OnChange(Player, () =>
+            {
+                targetPosition = new Vector2(Player.position.x, Player.position.y);
+            });
+        }
 
         Debug.Log($"OnlinePlayerController for {PlayerID} connected.");
     }
 
     void FixedUpdate()
     {
-        // Interpola em direção à posição alvo (do servidor) com velocidade constante
-        rb.position = Vector2.MoveTowards(
-            rb.position,
-            targetPosition,
-            smoothing * Time.fixedDeltaTime
-        );
-    }
+        if (Player == null) return;
 
-    void OnPlayerAdd(string key, PlayerSchema player)
-    {
-        if (key != PlayerID) return;
-        // Escuta mudanças só da posição do player
-        callbacks.OnChange(player.position, () =>
+        // Calcula distância até a posição do servidor
+        float distance = Vector2.Distance(rb.position, targetPosition);
+
+        if (distance > teleportThreshold)
         {
-            // Converte da célula para world space
-            Vector3 cell = new Vector3(player.position.x, player.position.y, 0);
-            targetPosition = worldGrid.GetCellCenterWorld(Vector3Int.FloorToInt(cell));
-        });
+            // Teleporta se estiver muito longe
+            rb.position = targetPosition;
+            velocitySmooth = Vector2.zero;
+        }
+        else if (distance > smoothingThreshold)
+        {
+            // Suaviza movimento
+            rb.position = Vector2.SmoothDamp(rb.position, targetPosition, ref velocitySmooth, smoothTime);
+        }
+        else
+        {
+            // Pequenos ajustes
+            rb.position = targetPosition;
+            velocitySmooth = Vector2.zero;
+        }
     }
 }

@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.Generic;
 using Colyseus;
 using Colyseus.Schema;
@@ -6,13 +7,24 @@ using UnityEngine;
 public class NetworkManager : MonoBehaviour
 {
     public static NetworkManager Instance { get; private set; }
+
+    [Header("Server Settings")]
     public string endpoint = "ws://localhost:2567";
     public ColyseusClient client;
     public ColyseusRoom<FarmRoomSchema> farmRoom = null;
-    public bool IsConnected = false;
+
+    [Header("Player Settings")]
     public GameObject onlinePlayerPrefab;
-    [SerializeField]
-    private Grid worldGrid;
+    [SerializeField] private Grid worldGrid;
+
+    [Header("Network Info")]
+    public bool IsConnected = false;
+    public float Ping = 0f;
+    public int PingSamples = 10; // Quantidade de pings para média
+    private Queue<float> pingHistory = new Queue<float>();
+
+    private Coroutine pingCoroutine;
+    private float lastPingSentTime = 0f;
 
     private void Awake()
     {
@@ -25,25 +37,18 @@ public class NetworkManager : MonoBehaviour
         DontDestroyOnLoad(gameObject);
     }
 
-    // Start is called once before the first execution of Update after the MonoBehaviour is created
-    void Start()
+    private void Start()
     {
         client = new ColyseusClient(endpoint);
         ConnectToRoom();
     }
 
-    // Update is called once per frame
-    void Update()
+    private void Update()
     {
-        if (farmRoom != null && farmRoom.Connection.IsOpen)
-        {
-            IsConnected = true;
-        }
-        else
-        {
-            IsConnected = false;
-        }
+        IsConnected = farmRoom != null && farmRoom.Connection.IsOpen;
     }
+
+    #region Room Connection
 
     private async void ConnectToRoom()
     {
@@ -55,6 +60,13 @@ public class NetworkManager : MonoBehaviour
             var callbacks = Callbacks.Get(farmRoom);
             callbacks.OnRemove(state => state.players, OnPlayerRemove);
             callbacks.OnAdd(state => state.players, OnPlayerAdd);
+
+            // Mensagens de ping/pong
+            farmRoom.OnMessage<string>("ping", msg => Debug.Log("Received ping from server: " + msg));
+            farmRoom.OnMessage<string>("pong", OnPongReceived);
+
+            // Começa a rotina de ping
+            StartPingRoutine();
         }
         catch (System.Exception e)
         {
@@ -62,20 +74,24 @@ public class NetworkManager : MonoBehaviour
         }
     }
 
+    #endregion
+
+    #region Player Management
+
     public void OnPlayerAdd(string key, PlayerSchema player)
     {
         if (player.id == farmRoom.SessionId) return; // ignora o jogador local
 
-        var initialPos = new Vector2(player.position.x, player.position.y);
-        var go = Instantiate(onlinePlayerPrefab, initialPos, Quaternion.identity);
-        var onlineController = go.GetComponent<OnlinePlayerController>();
+        Vector2 initialPos = new Vector2(player.position.x, player.position.y);
+        GameObject go = Instantiate(onlinePlayerPrefab, initialPos, Quaternion.identity);
+        OnlinePlayerController onlineController = go.GetComponent<OnlinePlayerController>();
         onlineController.Initialize(player.id, initialPos, worldGrid);
     }
 
     public void OnPlayerRemove(string key, PlayerSchema player)
     {
-        var onlinePlayer = FindObjectsByType<OnlinePlayerController>(FindObjectsSortMode.None);
-        foreach (var op in onlinePlayer)
+        var onlinePlayers = FindObjectsByType<OnlinePlayerController>(FindObjectsSortMode.None);
+        foreach (var op in onlinePlayers)
         {
             if (op.PlayerID == key)
             {
@@ -84,4 +100,61 @@ public class NetworkManager : MonoBehaviour
             }
         }
     }
+
+    #endregion
+
+    #region Ping System
+
+    private void OnDisable()
+    {
+        if (farmRoom != null)
+        {
+            farmRoom.OnMessage<string>("pong", null);
+        }
+
+        if (pingCoroutine != null)
+        {
+            StopCoroutine(pingCoroutine);
+        }
+    }
+
+    private void StartPingRoutine()
+    {
+        if (pingCoroutine != null)
+            StopCoroutine(pingCoroutine);
+
+        pingCoroutine = StartCoroutine(PingRoutine());
+    }
+
+    private IEnumerator PingRoutine()
+    {
+        while (farmRoom != null && farmRoom.Connection.IsOpen)
+        {
+            lastPingSentTime = Time.time;
+            farmRoom.Send("ping", null);
+            yield return new WaitForSeconds(2f);
+        }
+    }
+
+    private void OnPongReceived(string message)
+    {
+        float currentPing = (Time.time - lastPingSentTime) * 1000f; // ping em ms
+        AddPingSample(currentPing);
+    }
+
+    private void AddPingSample(float ping)
+    {
+        pingHistory.Enqueue(ping);
+        if (pingHistory.Count > PingSamples)
+            pingHistory.Dequeue();
+
+        float sum = 0f;
+        foreach (float p in pingHistory)
+            sum += p;
+
+        Ping = sum / pingHistory.Count;
+        Debug.Log($"Ping médio: {Ping:F1} ms");
+    }
+
+    #endregion
 }

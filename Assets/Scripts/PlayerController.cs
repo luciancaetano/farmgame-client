@@ -1,108 +1,139 @@
-using System.Collections;
-using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using Colyseus.Schema;
+using System.Collections.Generic;
+using System.Collections;
+using System;
 
 public class PlayerController : MonoBehaviour
 {
-    [Header("Movimento")]
-    [SerializeField] private float moveSpeed = 5f;
+    [Header("Movement")]
     [SerializeField] private InputActionReference moveAction;
 
-    [Header("Reconciliação")]
-    [SerializeField] private float teleportThreshold = 4f;
-    [SerializeField] private float smoothingThreshold = 0.05f;
-    [SerializeField] private float smoothTime = 0.1f;
-    [SerializeField] private float sendRate = 0.05f; // 50ms → 20 msgs por segundo
-    private float sendTimer = 0f;
-
     private Rigidbody2D rb;
-    private StateCallbackStrategy<FarmRoomSchema> callbacks;
-    private long seq = 0;
 
-    private List<InputMessage> pendingInputs = new List<InputMessage>();
-    private Vector2 velocitySmooth;
+    private PlayerSchema Player => GetLocalPlayer();
+    private int currentTick = 0;
 
     [System.Serializable]
-    private class InputMessage
+    class InputPayload
     {
-        public long seq;
-        public float dx;
-        public float dy;
+        public bool left;
+        public bool right;
+        public bool up;
+        public bool down;
+        public float tick;
     }
 
     void Awake()
     {
         rb = GetComponent<Rigidbody2D>();
         Time.fixedDeltaTime = 1f / 60f;
+        moveAction.action.Enable();
     }
 
     IEnumerator Start()
     {
         yield return new WaitUntil(() => NetworkManager.Instance.IsConnected);
-
-        callbacks = Callbacks.Get(NetworkManager.Instance.farmRoom);
     }
 
     void Update()
     {
-        var player = NetworkManager.Instance.farmRoom.State.players[NetworkManager.Instance.farmRoom.SessionId];
-        if (player == null) return;
-        moveSpeed = player.moveSpeed;
+        if (Player == null)
+        {
+            Debug.LogWarning("Player is null - check network connection");
+            return;
+        }
     }
 
     void FixedUpdate()
     {
-        if (!NetworkManager.Instance.IsConnected) return;
+        currentTick++;
 
-        sendTimer += Time.fixedDeltaTime;
+        var inputVector = moveAction.action.ReadValue<Vector2>();
 
-        Vector2 inputVector = moveAction.action.ReadValue<Vector2>();
-
-        if (sendTimer >= sendRate)
+        InputPayload input = new InputPayload
         {
-            var msg = new InputMessage { seq = ++seq, dx = inputVector.x, dy = inputVector.y };
-            NetworkManager.Instance.farmRoom.Send("move", msg);
-            pendingInputs.Add(msg);
+            left = inputVector.x < 0,
+            right = inputVector.x > 0,
+            up = inputVector.y > 0,
+            down = inputVector.y < 0,
+            tick = currentTick
+        };
 
-            sendTimer = 0f;
+        Vector2 moveDelta = Vector2.zero;
+
+        if (input.left)
+            moveDelta.x -= Player.moveSpeed;
+        if (input.right)
+            moveDelta.x += Player.moveSpeed;
+        if (input.up)
+            moveDelta.y += Player.moveSpeed;
+        if (input.down)
+            moveDelta.y -= Player.moveSpeed;
+
+        // Corrigir: usar Time.fixedDeltaTime em vez de delta (que está em milissegundos)
+        Vector2 newPosition = rb.position + moveDelta * Time.fixedDeltaTime;
+        rb.MovePosition(newPosition);
+
+        // Debug para verificar se está funcionando
+        if (moveDelta != Vector2.zero)
+        {
+            Debug.Log($"Moving player: {moveDelta}, Speed: {Player.moveSpeed}, Position: {newPosition}");
         }
-
-        // Predição local
-        rb.position += inputVector * moveSpeed * Time.fixedDeltaTime;
-
-        // Reconciliação
-        Reconcile();
     }
 
-    void Reconcile()
+    [ContextMenu("Cheat - Teleport North")]
+    public void TeleportNorth()
     {
-        var player = NetworkManager.Instance.farmRoom.State.players[NetworkManager.Instance.farmRoom.SessionId];
-        if (player == null) return;
+        TeleportPlayer(Vector2.up);
+    }
 
-        Vector2 serverPos = new Vector2(player.position.x, player.position.y);
+    [ContextMenu("Cheat - Teleport South")]
+    public void TeleportSouth()
+    {
+        TeleportPlayer(Vector2.down);
+    }
 
-        // Remove inputs já processados pelo servidor
-        pendingInputs.RemoveAll(input => input.seq <= player.lastSeq);
+    [ContextMenu("Cheat - Teleport East")]
+    public void TeleportEast()
+    {
+        TeleportPlayer(Vector2.right);
+    }
 
-        // Predição: reaplica apenas inputs pendentes
-        Vector2 predictedPos = serverPos;
-        foreach (var input in pendingInputs)
-        {
-            predictedPos += new Vector2(input.dx, input.dy) * moveSpeed * Time.fixedDeltaTime;
-        }
+    [ContextMenu("Cheat - Teleport West")]
+    public void TeleportWest()
+    {
+        TeleportPlayer(Vector2.left);
+    }
 
-        // Correção suave ou teleport
-        float distance = Vector2.Distance(rb.position, predictedPos);
+    [ContextMenu("Cheat - Random Teleport")]
+    public void RandomTeleport()
+    {
+        Vector2 randomDirection = new Vector2(
+            UnityEngine.Random.Range(-1f, 1f),
+            UnityEngine.Random.Range(-1f, 1f)
+        ).normalized;
+        TeleportPlayer(randomDirection);
+    }
 
-        if (distance > teleportThreshold)
-        {
-            rb.position = predictedPos; // Teleporta se estiver muito fora
-        }
-        else if (distance > smoothingThreshold)
-        {
-            rb.position = Vector2.SmoothDamp(rb.position, predictedPos, ref velocitySmooth, smoothTime);
-        }
+    private void TeleportPlayer(Vector2 direction)
+    {
+        if (Player == null) return;
+
+        Vector2 teleportPosition = rb.position + (direction * 5f);
+        rb.position = teleportPosition;
+        Debug.Log($"Teleported to: {teleportPosition}");
+    }
+
+    private PlayerSchema GetLocalPlayer()
+    {
+        var nm = NetworkManager.Instance;
+        var farmRoom = nm?.farmRoom;
+        var state = farmRoom?.State;
+        var sessionId = farmRoom?.SessionId;
+
+        if (state == null || state.players == null || sessionId == null) return null;
+        return state.players.ContainsKey(sessionId) ? state.players[sessionId] : null;
     }
 }
