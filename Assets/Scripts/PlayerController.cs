@@ -15,6 +15,9 @@ public class PlayerController : MonoBehaviour
     private PlayerSchema Player => GetLocalPlayer();
     private int currentTick = 0;
 
+    private float elapsedTime = 0f;
+    private float fixedTimeStep = 1f / 60f; // 60 ticks per second
+
     [System.Serializable]
     class InputPayload
     {
@@ -28,7 +31,6 @@ public class PlayerController : MonoBehaviour
     void Awake()
     {
         rb = GetComponent<Rigidbody2D>();
-        Time.fixedDeltaTime = 1f / 60f;
         moveAction.action.Enable();
     }
 
@@ -44,9 +46,17 @@ public class PlayerController : MonoBehaviour
             Debug.LogWarning("Player is null - check network connection");
             return;
         }
+
+        elapsedTime += Time.deltaTime;
+
+        while (elapsedTime >= fixedTimeStep)
+        {
+            elapsedTime -= fixedTimeStep;
+            FixedServerUpdate();
+        }
     }
 
-    void FixedUpdate()
+    void FixedServerUpdate()
     {
         currentTick++;
 
@@ -61,20 +71,25 @@ public class PlayerController : MonoBehaviour
             tick = currentTick
         };
 
+        NetworkManager.Instance.farmRoom.Send(0, input);
+
         Vector2 moveDelta = Vector2.zero;
 
+        float speed = (Player != null && Player.moveSpeed > 0) ? Player.moveSpeed : 0.5f;
+
         if (input.left)
-            moveDelta.x -= Player.moveSpeed;
+            moveDelta.x -= speed;
         if (input.right)
-            moveDelta.x += Player.moveSpeed;
+            moveDelta.x += speed;
         if (input.up)
-            moveDelta.y += Player.moveSpeed;
+            moveDelta.y += speed;
         if (input.down)
-            moveDelta.y -= Player.moveSpeed;
+            moveDelta.y -= speed;
 
         // Corrigir: usar Time.fixedDeltaTime em vez de delta (que está em milissegundos)
-        Vector2 newPosition = rb.position + moveDelta * Time.fixedDeltaTime;
+        Vector2 newPosition = rb.position + moveDelta * fixedTimeStep;
         rb.MovePosition(newPosition);
+
 
         // Debug para verificar se está funcionando
         if (moveDelta != Vector2.zero)

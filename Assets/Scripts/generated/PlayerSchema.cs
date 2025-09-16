@@ -24,16 +24,10 @@ public PlayerSchema() { }
 	[Type(2, "ref", typeof(Position2D))]
 	public Position2D position = null;
 
-	[Type(3, "ref", typeof(Position2D))]
-	public Position2D prevPosition = null;
-
-	[Type(4, "int64")]
-	public long lastSeq = default(long);
-
-	[Type(5, "float32")]
+	[Type(3, "float32")]
 	public float moveSpeed = default(float);
 
-	[Type(6, "int64")]
-	public long lastProcessedSeq = default(long);
+	[Type(4, "number")]
+	public float tick = default(float);
 }
 
